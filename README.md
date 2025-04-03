@@ -18,7 +18,7 @@ knock up GFW IP blockage
 - it bypass ip blockage, so it bypass principal core of filtering
 - it change the paradigm of anti-censorship from "hiding traffic" / "escaping blockage" to "drilling whatever blocked"
 - what more can a censorman do after detecting a VPN, beside blocking ip?
-- similar to [fragment that bypass SNI](https://github.com/GFW-knocker/gfw_resist_tls_proxy) , it operate at the lower network layer
+- similar to [fragment](https://github.com/GFW-knocker/gfw_resist_tls_proxy) that bypass filtered Domain/SNI , it operate at the lower network layer
 - no matter which protocol used at upper level, it can drill everything, even blocked port
 
 # can GFW block tcp violation method?
@@ -34,3 +34,8 @@ knock up GFW IP blockage
 - need <b>root/admin</b> access in <b>both client & server</b> to modify/send/sniff crafted packet
 - we implement method1 : a prototype for proof-of-concept that can run on both windows & linux
 - its not ready for production yet but we plan to build stable and standalone version in near future
+
+# what is Next?
+- next step is to implement on xray-core
+- thus anyone can easily create a "tcp violation" config and revive blocked vps ip
+
