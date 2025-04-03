@@ -1,4 +1,5 @@
 # client:server port mapping
+# for example 14000:443 means client listen on tcp:14000 and it forward data to server tcp:443
 tcp_port_mapping = {14000: 443, 
                     15000: 2096,
                     16000: 10809
@@ -37,7 +38,7 @@ udp_timeout = 300
 # verify cert root (set to true only if you have valid cert)
 quic_verify_cert = False
 
-# quic carrier mtu (recommended=1420) must be grater than wireguard mtu (recommended=800) in your config
+# quic carrier mtu(recommended=1420) must be grater than wireguard mtu(recommended=800) in your config
 quic_mtu = 1420
 
 quic_cert_filepath = ('cert.pem', 'key.pem')
