@@ -31,7 +31,7 @@ class TunnelClientProtocol(QuicConnectionProtocol):
         active_protocols.append(self)
         asyncio.create_task(self.cleanup_stale_udp_connections())
         asyncio.create_task(self.check_start_connectivity())
-        asyncio.create_task(self.send_heartbeat())  # Heartbeat task
+        asyncio.create_task(self.send_heartbeat())  # Heartbeat task added
 
     async def check_start_connectivity(self):
         global is_quic_established
@@ -53,7 +53,7 @@ class TunnelClientProtocol(QuicConnectionProtocol):
                 if self._quic and is_quic_established:
                     # Using a simple ping message (could be refined)
                     heartbeat_msg = parameters.quic_auth_code + "heartbeat"
-                    # Sending heartbeat on stream 0 (or a dedicated heartbeat stream if needed)
+                    # Sending heartbeat as a datagram frame
                     self._quic.send_datagram_frame(heartbeat_msg.encode("utf-8"))
                     self.transmit()
                     logger.info("Heartbeat sent")
@@ -100,8 +100,8 @@ class TunnelClientProtocol(QuicConnectionProtocol):
     def close_this_stream(self, stream_id):
         try:
             logger.info(f"FIN to stream={stream_id} sent")
-            self._quic.send_stream_data(stream_id, b"", end_stream=True)
-            self.transmit()
+            self._quic.send_stream_data(stream_id, b"", end_stream=True)  # Send FIN flag
+            self.transmit()  # Send the FIN flag over the network
         except Exception as e:
             logger.info(f"Error closing stream at client: {e}")
         try:
@@ -141,11 +141,11 @@ class TunnelClientProtocol(QuicConnectionProtocol):
             self.tcp_connections[stream_id] = (reader, writer)
             del self.tcp_syn_wait[stream_id]
             while True:
-                data = await reader.read(4096)
+                data = await reader.read(4096)  # Read data from TCP socket
                 if not data:
                     break
                 self._quic.send_stream_data(stream_id=stream_id, data=data, end_stream=False)
-                self.transmit()
+                self.transmit()  # flush
         except Exception as e:
             logger.info(f"Error forwarding TCP to QUIC: {e}")
         finally:
@@ -154,11 +154,12 @@ class TunnelClientProtocol(QuicConnectionProtocol):
 
     async def handle_tcp_connection(self, reader, writer, target_port):
         try:
+            # Assign a new QUIC stream for this TCP connection
             stream_id = self._quic.get_next_available_stream_id()
             self.tcp_syn_wait[stream_id] = (reader, writer)
             req_data = parameters.quic_auth_code + "connect,tcp," + str(target_port) + ",!###!"
             self._quic.send_stream_data(stream_id=stream_id, data=req_data.encode("utf-8"), end_stream=False)
-            self.transmit()
+            self.transmit()  # flush
         except Exception as e:
             logger.info(f"Client Error handle tcp connection: {e}")
             self.close_this_stream(stream_id)
@@ -168,10 +169,10 @@ class TunnelClientProtocol(QuicConnectionProtocol):
         try:
             while True:
                 data, addr = await udp_protocol.queue.get()
-                stream_id = self.udp_addr_to_stream.get(addr)
-                if stream_id is not None:
+                if addr in self.udp_addr_to_stream:
+                    stream_id = self.udp_addr_to_stream.get(addr)
                     self._quic.send_stream_data(stream_id=stream_id, data=data, end_stream=False)
-                    self.transmit()
+                    self.transmit()  # flush
                     self.udp_last_activity[stream_id] = self.loop.time()
                 else:
                     stream_id = self.new_udp_stream(addr, udp_protocol)
@@ -179,7 +180,7 @@ class TunnelClientProtocol(QuicConnectionProtocol):
                         await asyncio.sleep(0.1)
                         self.udp_last_activity[stream_id] = self.loop.time()
                         self._quic.send_stream_data(stream_id=stream_id, data=data, end_stream=False)
-                        self.transmit()
+                        self.transmit()  # flush
         except Exception as e:
             logger.info(f"Error forwarding UDP to QUIC: {e}")
         finally:
@@ -196,7 +197,7 @@ class TunnelClientProtocol(QuicConnectionProtocol):
             self.udp_last_activity[stream_id] = self.loop.time()
             req_data = parameters.quic_auth_code + "connect,udp," + str(udp_protocol.target_port) + ",!###!"
             self._quic.send_stream_data(stream_id=stream_id, data=req_data.encode("utf-8"), end_stream=False)
-            self.transmit()
+            self.transmit()  # flush
             return stream_id
         except Exception as e:
             logger.info(f"Client Error creating new udp stream: {e}")
@@ -248,6 +249,7 @@ async def run_client():
                                configuration=configuration,
                                create_protocol=TunnelClientProtocol,
                                local_port=parameters.quic_client_port) as client:
+                
                 async def start_tcp_server(local_port, target_port):
                     logger.warning(f"client listen tcp:{local_port} -> to server tcp:{target_port}")
                     server = await asyncio.start_server(
