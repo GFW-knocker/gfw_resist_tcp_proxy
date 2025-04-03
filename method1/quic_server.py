@@ -11,6 +11,7 @@ import parameters
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("QuicServer")
 
+# Global list to track active protocol instances
 active_protocols = []
 
 class TunnelServerProtocol(QuicConnectionProtocol):
@@ -49,8 +50,8 @@ class TunnelServerProtocol(QuicConnectionProtocol):
     def close_this_stream(self, stream_id):
         try:
             logger.info(f"FIN to stream={stream_id} sent")
-            self._quic.send_stream_data(stream_id, b"", end_stream=True)
-            self.transmit()
+            self._quic.send_stream_data(stream_id, b"", end_stream=True)  # Send FIN flag
+            self.transmit()  # Send the FIN flag over the network
         except Exception as e:
             logger.info(f"Error closing stream at server: {e}")
         try:
@@ -82,11 +83,11 @@ class TunnelServerProtocol(QuicConnectionProtocol):
         logger.info("Task TCP to QUIC started")
         try:
             while True:
-                data = await reader.read(4096)
+                data = await reader.read(4096)  # Read data from TCP socket
                 if not data:
                     break
                 self._quic.send_stream_data(stream_id=stream_id, data=data, end_stream=False)
-                self.transmit()
+                self.transmit()  # Flush
         except Exception as e:
             logger.info(f"Error forwarding TCP to QUIC: {e}")
         finally:
@@ -101,7 +102,7 @@ class TunnelServerProtocol(QuicConnectionProtocol):
             asyncio.create_task(self.forward_tcp_to_quic(stream_id, reader))
             resp_data = parameters.quic_auth_code + "i am ready,!###!"
             self._quic.send_stream_data(stream_id=stream_id, data=resp_data.encode("utf-8"), end_stream=False)
-            self.transmit()
+            self.transmit()  # Flush
             self.tcp_connections[stream_id] = (reader, writer)
         except Exception as e:
             logger.info(f"Failed to establish TCP:{target_port} connection: {e}")
@@ -111,11 +112,11 @@ class TunnelServerProtocol(QuicConnectionProtocol):
         logger.info("Task UDP to QUIC started")
         try:
             while True:
-                data, _ = await protocol.queue.get()
+                data, _ = await protocol.queue.get()  # Wait for data from UDP
                 if data is None:
                     break
                 self._quic.send_stream_data(stream_id, data)
-                self.transmit()
+                self.transmit()  # Flush
                 self.udp_last_activity[stream_id] = self.loop.time()
         except Exception as e:
             logger.info(f"Error forwarding UDP to QUIC: {e}")
@@ -139,14 +140,14 @@ class TunnelServerProtocol(QuicConnectionProtocol):
 
             def error_received(self, exc):
                 logger.info(f"UDP error received: {exc}")
-                self.queue.put_nowait((None, None))
+                self.queue.put_nowait((None, None))  # to cancel task
                 if self.transport:
                     self.transport.close()
                     logger.info("UDP transport closed")
 
             def connection_lost(self, exc):
                 logger.info("UDP connection lost.")
-                self.queue.put_nowait((None, None))
+                self.queue.put_nowait((None, None))  # to cancel task
                 if self.transport:
                     self.transport.close()
                     logger.info("UDP transport closed")
@@ -159,7 +160,7 @@ class TunnelServerProtocol(QuicConnectionProtocol):
                 remote_addr=(parameters.xray_server_ip_address, target_port)
             )
             self.udp_connections[stream_id] = (transport, protocol)
-            self.udp_last_activity[stream_id] = self.loop.time()
+            self.udp_last_activity[stream_id] = self.loop.time()  # Track last activity time
             logger.info(f"UDP connection established for stream {stream_id} to port {target_port}")
             asyncio.create_task(self.forward_udp_to_quic(stream_id, protocol))
         except Exception as e:
@@ -183,6 +184,7 @@ class TunnelServerProtocol(QuicConnectionProtocol):
                     transport.sendto(event.data)
                     self.udp_last_activity[event.stream_id] = self.loop.time()
                 else:
+                    # Assume req is like => auth+"connect,udp,443,!###!"
                     req_parts = event.data.split(b",!###!", 1)
                     req_header = ""
                     try:
@@ -227,9 +229,11 @@ async def run_server():
     configuration.idle_timeout = parameters.quic_idle_timeout
     configuration.max_datagram_size = parameters.quic_mtu
 
+    # Start QUIC server
     await serve("0.0.0.0", parameters.quic_server_port, configuration=configuration, create_protocol=TunnelServerProtocol)
     logger.warning(f"Server listening for QUIC on port {parameters.quic_server_port}")
-    await asyncio.Future()
+    # Keep the server running
+    await asyncio.Future()  # Run forever
 
 def handle_shutdown(signum, frame):
     logger.info("Shutting down server gracefully...")
