@@ -41,7 +41,7 @@ async def async_sniff_realtime(qu1):
     try:
         def process_packet(packet):
             # logger.info(f"sniffed before if at {time.time()}")
-            if packet.haslayer(TCP) and packet[IP].dst == vps_ip and packet[TCP].dport == vio_tcp_server_port and packet[TCP].flags == 'AP':
+            if packet.haslayer(TCP) and packet[TCP].dport == vio_tcp_server_port and packet[TCP].flags == 'AP':
                 data1 = packet[TCP].load
                 client_ip = packet[IP].src
                 client_port = packet[TCP].sport
