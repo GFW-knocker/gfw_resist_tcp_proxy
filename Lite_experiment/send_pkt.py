@@ -12,7 +12,7 @@ tcp_options=[
     ]
 
 
-pkt = IP(dst=vps_ip) / TCP(sport=54740, dport=29745, seq=1 , flags="AP", ack=1 , options=tcp_options) / "sample msg"
+pkt = IP(dst=vps_ip) / TCP(sport=54740, dport=443, seq=1 , flags="AP", ack=1 , options=tcp_options) / "sample msg"
 
 
 send(pkt, count=1, verbose=1)
