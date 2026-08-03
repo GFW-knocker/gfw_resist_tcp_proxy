@@ -1,8 +1,18 @@
-توجه: این متد اتصال، در قطعی اینترنت ناشی از سرکوب خونین مردم در دیماه 1404 کاملا جواب میدهد. اما نیاز به خط اینترنت ثابت و دسترسی روت هم در vps و هم در pc دارد. در تلاش هستیم نسخه باینری تهیه کنیم که راه اندازی آن را ساده کند. ( در نت موبایل ، 4g ، td-lte و دانگل و هات اسپات و امثالهم جواب نمیدهد چون نیازمند ارسال پکت نامتعارف به شبکه است اما در خطوط ثابت و مودم های adsl استاندارد و همچنین سرور ایران که نت پهن باند دارند قابل استفاده است )
+# NEW: Go binary released
+see this : 
 
-نمونه پیاده شده با زبان گو :  (https://github.com/hanselime/paqet)
+https://github.com/GFW-knocker/gfw_resist_tcp_proxy/tree/main/go%20implementation
 
-اسکریپت نصب راحت : (https://github.com/SamNet-dev/paqctl)
+# توجه
+توجه: این متد اتصال، در قطعی اینترنت ناشی از سرکوب خونین مردم در دیماه 1404 کاملا جواب میداد. اما نیاز به خط اینترنت ثابت و دسترسی روت هم در vps و هم در pc دارد. ( در نت موبایل ، 4g ، td-lte و دانگل و هات اسپات و امثالهم جواب نمیدهد چون نیازمند ارسال پکت نامتعارف به شبکه است اما در خطوط ثابت و مودم های adsl استاندارد و همچنین سرور ایران که نت پهن باند دارند قابل استفاده است )
+
+پیاده سازی این پروژه با گو : (https://github.com/GFW-knocker/gfw_resist_tcp_proxy/tree/main/go%20implementation)
+
+دانلود نسخه باینری استیبل و پایدار : (https://github.com/GFW-knocker/gfw_resist_tcp_proxy/releases/latest)
+
+نمونه دیگری پیاده شده با زبان گو :  (https://github.com/hanselime/paqet)
+
+اسکریپت نصب راحت نسخه پایتون : (https://github.com/SamNet-dev/paqctl)
 
 # gfw_resist_tcp_proxy
 knock up GFW IP blockage
