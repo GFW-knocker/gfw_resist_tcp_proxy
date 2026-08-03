@@ -1,9 +1,33 @@
-# gfk — Go implementation
+# Quick setup
+1. install on linux vps ( if you dont like install script, you can manually run binary on vps in tmux)
+
+```sh
+bash <(curl -fsSL 'https://raw.githubusercontent.com/GFW-knocker/gfw_resist_tcp_proxy/main/go%20implementation/scripts/gfk.sh') install
+```
+2. edit client.yaml
+```
+vps_ip
+server_port
+client_port
+auth_key
+forwards
+- {proto: tcp, listen: "0.0.0.0:12000", target_port: 443} --> this listen on pc_ip:12000 , forward traffic to vps_ip:443
+```
+3. edit server.yaml
+```
+server_port
+auth_key
+allowed_ports (when leave empty , client can forward its traffic to any port)
+```
+4. run both client and server and wait to see 
+```
+kcp tunnel established
+```
+
+# gfk tunnel — Go implementation
 
 A Go rewrite of the original Python variant (in `../python implementation/`).
-Same core idea (send data over
-handshake-less TCP ACK+PSH packets so the GFW's SYN-only IP blocklist never sees
-it), but with a proper reliability layer, multiplexing, keepalive/auto-reconnect,
+Same idea, but with a proper reliability layer, multiplexing, keepalive/auto-reconnect,
 multi-client support, and no Python/scapy in the hot path.
 
 ## Architecture
