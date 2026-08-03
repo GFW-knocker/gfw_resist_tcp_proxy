@@ -341,23 +341,30 @@ func startEngine(cfg config.Config, applyFW bool, onState func(supervisor.State)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 
+	span := cfg.Carrier.ClientPortSpan
+	if span < 1 {
+		span = 1
+	}
+	portEnd := cfg.Carrier.ClientPort + uint16(span) - 1
+
 	var fwRemove func() error
 	if applyFW {
-		rm, err := firewall.Install(firewall.Rules{LocalPort: cfg.Carrier.ClientPort})
+		rm, err := firewall.Install(firewall.Rules{PortStart: cfg.Carrier.ClientPort, PortEnd: portEnd})
 		if err != nil {
 			cancel()
 			return nil, fmt.Errorf("firewall: %w", err)
 		}
 		fwRemove = rm
-		logger.Info("firewall RST-suppression applied", "port", cfg.Carrier.ClientPort)
+		logger.Info("firewall RST-suppression applied", "ports", fmt.Sprintf("%d-%d", cfg.Carrier.ClientPort, portEnd))
 	}
 
 	car, err := carrier.Open(carrier.Options{
-		Role:       carrier.RoleClient,
-		VPSIP:      vpsIP,
-		ServerPort: cfg.Carrier.ServerPort,
-		ClientPort: cfg.Carrier.ClientPort,
-		Interface:  cfg.Carrier.Interface,
+		Role:           carrier.RoleClient,
+		VPSIP:          vpsIP,
+		ServerPort:     cfg.Carrier.ServerPort,
+		ClientPort:     cfg.Carrier.ClientPort,
+		ClientPortSpan: cfg.Carrier.ClientPortSpan,
+		Interface:      cfg.Carrier.Interface,
 	})
 	if err != nil {
 		cancel()
@@ -380,7 +387,12 @@ func startEngine(cfg config.Config, applyFW bool, onState func(supervisor.State)
 	if delay <= 0 {
 		delay = 3 * time.Second
 	}
+	dialCount := 0
 	sup := supervisor.New(func(dctx context.Context) (transport.Session, error) {
+		if dialCount > 0 {
+			car.RotateClientPort() // fresh source port on reconnect
+		}
+		dialCount++
 		sess, err := transport.Dial(dctx, car, remote, params)
 		if err != nil {
 			return nil, err

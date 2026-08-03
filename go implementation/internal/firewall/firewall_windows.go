@@ -14,7 +14,11 @@ import (
 // inbound carrier packets are still delivered to gfk. We block both directions
 // on the port for good measure.
 func install(r Rules) (func() error, error) {
-	port := strconv.Itoa(int(r.LocalPort))
+	start, end := r.ports()
+	port := strconv.Itoa(int(start))
+	if end != start {
+		port = fmt.Sprintf("%d-%d", start, end) // netsh inclusive port range
+	}
 	nameIn := "gfk-carrier-in-" + port
 	nameOut := "gfk-carrier-out-" + port
 

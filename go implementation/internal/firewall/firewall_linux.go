@@ -14,7 +14,11 @@ import (
 //     does not create phantom state for our handshake-less flow;
 //   - mangle/OUTPUT drop of any kernel-generated RST from the carrier port.
 func install(r Rules) (func() error, error) {
-	port := strconv.Itoa(int(r.LocalPort))
+	start, end := r.ports()
+	port := strconv.Itoa(int(start))
+	if end != start {
+		port = fmt.Sprintf("%d:%d", start, end) // iptables inclusive port range
+	}
 	// Each entry: table, then the rule spec (without -A/-D).
 	specs := [][]string{
 		{"raw", "PREROUTING", "-p", "tcp", "--dport", port, "-j", "NOTRACK"},

@@ -134,6 +134,31 @@ func TestCarrierConstantSeq(t *testing.T) {
 	}
 }
 
+// TestRotateClientPort verifies the client source port cycles within its span
+// and that rotation is a no-op for span<=1 or the server role.
+func TestRotateClientPort(t *testing.T) {
+	c := &Carrier{opts: Options{Role: RoleClient, ClientPort: 40000, ClientPortSpan: 4}}
+	c.curClientPort.Store(uint32(c.opts.ClientPort))
+	want := []uint16{40001, 40002, 40003, 40000, 40001} // wraps within [40000, 40004)
+	for i, w := range want {
+		if got := c.RotateClientPort(); got != w {
+			t.Fatalf("rotate #%d = %d, want %d", i, got, w)
+		}
+	}
+
+	noRotate := []Options{
+		{Role: RoleClient, ClientPort: 40000, ClientPortSpan: 1}, // span disables
+		{Role: RoleServer, ClientPort: 40000, ClientPortSpan: 8}, // server never rotates
+	}
+	for _, o := range noRotate {
+		c := &Carrier{opts: o}
+		c.curClientPort.Store(uint32(o.ClientPort))
+		if got := c.RotateClientPort(); got != o.ClientPort {
+			t.Errorf("role=%v span=%d should not rotate, got %d", o.Role, o.ClientPortSpan, got)
+		}
+	}
+}
+
 // TestServerExplicitVPSIPOverrides: when VPSIP is set, replies use it regardless
 // of what the client addressed.
 func TestServerExplicitVPSIPOverrides(t *testing.T) {

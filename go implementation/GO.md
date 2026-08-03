@@ -59,11 +59,28 @@ a shared `auth.key`, ports, forwards). Then:
 
 ```sh
 # server (VPS, root):
-sudo ./gfk -config server.yaml            # or use scripts/install-server.sh for systemd
+sudo ./gfk -config server.yaml            # -dropRST to apply firewall rules unprompted
 
 # client (PC, admin + Npcap on Windows / root on Linux):
 ./gfk -config client.yaml
 ```
+
+If `-config` is omitted, gfk looks for `server.yaml` / `client.yaml` next to the
+binary — so a `gfk` binary sitting alongside its config (e.g. `/root/gfk/`) runs
+with no flags.
+
+**Easiest server setup** — the `gfk` installer (`scripts/gfk.sh`, kept in the repo)
+downloads the right binary from the GitHub release into `/root/gfk/` (next to its
+config), installs a boot-enabled systemd service, and gives you
+`gfk {start|stop|restart|status|log|edit|update|uninstall}`:
+
+```sh
+bash <(curl -fsSL 'https://raw.githubusercontent.com/GFW-knocker/gfw_resist_tcp_proxy/main/go%20implementation/scripts/gfk.sh') install
+```
+
+Publish a GitHub release with just the two binaries `gfk-linux-amd64` and
+`gfk-linux-arm64` (built in `dist/`); the installer script is served from the repo,
+not the release.
 
 Both sides need to suppress kernel RSTs on the carrier port. gfk does this itself
 (prompts once, unless `firewall.manage: yes` or `-dropRST`).

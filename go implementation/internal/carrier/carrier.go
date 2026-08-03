@@ -21,9 +21,12 @@ type Options struct {
 	Role       Role
 	VPSIP      net.IP // client: server's filtered public IP (required); server: optional reply source, auto-derived per client if nil
 	ServerPort uint16 // carrier TCP port the server "listens" on
-	ClientPort uint16 // carrier TCP source port the client uses
-	Interface  string // NIC name; empty = auto-detect toward VPSIP
-	SnapLen    int    // capture length; defaults applied if 0
+	ClientPort uint16 // carrier TCP source port the client uses (base of the rotation range)
+	// ClientPortSpan is how many source ports the client rotates through on
+	// reconnect, starting at ClientPort. 1 (or 0) disables rotation.
+	ClientPortSpan int
+	Interface      string // NIC name; empty = auto-detect toward VPSIP
+	SnapLen        int    // capture length; defaults applied if 0
 }
 
 // rxPacket is one received carrier payload plus its source peer.
@@ -38,6 +41,11 @@ type Carrier struct {
 	pio     packetIO
 	localIP net.IP
 	peer    *Addr // client mode: the single server peer
+
+	// curClientPort is the client's current carrier source port, rotated across
+	// [ClientPort, ClientPort+ClientPortSpan) on reconnect to dodge a KCP session
+	// collision with the server's not-yet-expired old session.
+	curClientPort atomic.Uint32
 
 	// learnedSrc maps a client addr string -> the reply source IP (the dst IP the
 	// client addressed us at). Server auto-derive mode only (VPSIP nil).
@@ -117,6 +125,7 @@ func Open(opts Options) (*Carrier, error) {
 		rx:      make(chan rxPacket, 1024),
 		closed:  make(chan struct{}),
 	}
+	c.curClientPort.Store(uint32(opts.ClientPort))
 	if opts.Role == RoleClient {
 		c.peer = &Addr{IP: opts.VPSIP, Port: opts.ServerPort}
 	}
@@ -126,6 +135,21 @@ func Open(opts Options) (*Carrier, error) {
 
 // LocalIP reports the source IP used for crafted packets.
 func (c *Carrier) LocalIP() net.IP { return c.localIP }
+
+// RotateClientPort advances the client's carrier source port within its span so
+// the next reconnect looks like a fresh flow to the server, avoiding a stall
+// while the server's previous session for the old port times out. No-op on the
+// server or when span<=1. Returns the new port. Only the reconnect loop calls
+// this (single writer); recvLoop/WriteTo read the value atomically.
+func (c *Carrier) RotateClientPort() uint16 {
+	if c.opts.Role != RoleClient || c.opts.ClientPortSpan <= 1 {
+		return uint16(c.curClientPort.Load())
+	}
+	base := uint32(c.opts.ClientPort)
+	next := base + (c.curClientPort.Load()-base+1)%uint32(c.opts.ClientPortSpan)
+	c.curClientPort.Store(next)
+	return uint16(next)
+}
 
 // usableSrcIP reports whether ip is a sane reply source address.
 func usableSrcIP(ip net.IP) bool {
@@ -151,7 +175,7 @@ func (c *Carrier) recvLoop() {
 
 		var addr *Addr
 		if c.opts.Role == RoleClient {
-			if !seg.srcIP.Equal(c.opts.VPSIP) || seg.srcPort != c.opts.ServerPort || seg.dstPort != c.opts.ClientPort {
+			if !seg.srcIP.Equal(c.opts.VPSIP) || seg.srcPort != c.opts.ServerPort || seg.dstPort != uint16(c.curClientPort.Load()) {
 				continue
 			}
 			addr = c.peer
@@ -223,7 +247,7 @@ func (c *Carrier) WriteTo(p []byte, addr net.Addr) (int, error) {
 	var srcIP, dstIP net.IP
 	var srcPort, dstPort uint16
 	if c.opts.Role == RoleClient {
-		srcIP, srcPort = c.localIP, c.opts.ClientPort
+		srcIP, srcPort = c.localIP, uint16(c.curClientPort.Load())
 		dstIP, dstPort = c.opts.VPSIP, c.opts.ServerPort
 	} else {
 		ip, port, ok := addrFromNet(addr)
@@ -262,7 +286,7 @@ func (c *Carrier) Stats() (in, out uint64) {
 // LocalAddr implements net.PacketConn.
 func (c *Carrier) LocalAddr() net.Addr {
 	if c.opts.Role == RoleClient {
-		return &Addr{IP: c.localIP, Port: c.opts.ClientPort}
+		return &Addr{IP: c.localIP, Port: uint16(c.curClientPort.Load())}
 	}
 	ip := c.opts.VPSIP
 	if ip == nil {

@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -34,7 +35,11 @@ func main() {
 	flag.Parse()
 
 	if *cfgPath == "" {
+		*cfgPath = defaultConfigPath() // look for a config next to the binary
+	}
+	if *cfgPath == "" {
 		fmt.Fprintln(os.Stderr, "usage: gfk -config <file.yaml> [-dropRST]")
+		fmt.Fprintln(os.Stderr, "  (or place server.yaml / client.yaml next to the gfk binary)")
 		os.Exit(2)
 	}
 	forceFirewall := *dropRST || *dropRSTlc
@@ -46,6 +51,7 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)}))
+	logger.Info("config loaded", "path", *cfgPath)
 
 	// vps_ip is required on the client; optional on the server (auto-derived).
 	var vpsIP net.IP
@@ -63,19 +69,24 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// --- Firewall (RST suppression) ---
-	localPort := cfg.Carrier.ServerPort
+	// --- Firewall (RST suppression) --- covers the client's port-rotation range.
+	fwRules := firewall.Rules{PortStart: cfg.Carrier.ServerPort, PortEnd: cfg.Carrier.ServerPort}
 	if cfg.Mode == config.ModeClient {
-		localPort = cfg.Carrier.ClientPort
+		span := cfg.Carrier.ClientPortSpan
+		if span < 1 {
+			span = 1
+		}
+		fwRules = firewall.Rules{PortStart: cfg.Carrier.ClientPort, PortEnd: cfg.Carrier.ClientPort + uint16(span) - 1}
 	}
+	portDesc := fmt.Sprintf("%d-%d", fwRules.PortStart, fwRules.PortEnd)
 	if decideFirewall(cfg.Firewall.Manage, forceFirewall) {
-		remove, err := firewall.Install(firewall.Rules{LocalPort: localPort})
+		remove, err := firewall.Install(fwRules)
 		if err != nil {
 			logger.Error("failed to apply firewall rules", "err", err)
 			logger.Error("without RST suppression the OS will reset the carrier; aborting")
 			os.Exit(1)
 		}
-		logger.Info("firewall RST-suppression rules applied", "port", localPort)
+		logger.Info("firewall RST-suppression rules applied", "ports", portDesc)
 		defer func() {
 			if err := remove(); err != nil {
 				logger.Warn("failed to remove firewall rules", "err", err)
@@ -84,7 +95,7 @@ func main() {
 			}
 		}()
 	} else {
-		logger.Warn("firewall rules NOT managed by gfk; ensure kernel RSTs are suppressed on the carrier port yourself", "port", localPort)
+		logger.Warn("firewall rules NOT managed by gfk; ensure kernel RSTs are suppressed on the carrier port(s) yourself", "ports", portDesc)
 	}
 
 	// --- Carrier ---
@@ -93,11 +104,12 @@ func main() {
 		role = carrier.RoleClient
 	}
 	car, err := carrier.Open(carrier.Options{
-		Role:       role,
-		VPSIP:      vpsIP,
-		ServerPort: cfg.Carrier.ServerPort,
-		ClientPort: cfg.Carrier.ClientPort,
-		Interface:  cfg.Carrier.Interface,
+		Role:           role,
+		VPSIP:          vpsIP,
+		ServerPort:     cfg.Carrier.ServerPort,
+		ClientPort:     cfg.Carrier.ClientPort,
+		ClientPortSpan: cfg.Carrier.ClientPortSpan,
+		Interface:      cfg.Carrier.Interface,
 	})
 	if err != nil {
 		logger.Error("failed to open carrier", "err", err)
@@ -130,7 +142,16 @@ func runClient(ctx context.Context, cfg config.Config, car *carrier.Carrier, par
 	if delay <= 0 {
 		delay = 3 * time.Second
 	}
+	dialCount := 0
 	sup := supervisor.New(func(dctx context.Context) (transport.Session, error) {
+		if dialCount > 0 {
+			// Reconnect: use a fresh source port so the server sees a new flow
+			// instead of colliding with its previous (still-expiring) session.
+			if p := car.RotateClientPort(); p != 0 {
+				logger.Debug("rotated carrier source port for reconnect", "port", p)
+			}
+		}
+		dialCount++
 		sess, err := transport.Dial(dctx, car, remote, params)
 		if err != nil {
 			return nil, err
@@ -188,6 +209,24 @@ func promptYesNo(prompt string) bool {
 	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	line = strings.TrimSpace(strings.ToLower(line))
 	return line == "" || line == "y" || line == "yes"
+}
+
+// defaultConfigPath returns a config file sitting next to the executable when
+// -config is omitted, so a gfk binary placed alongside server.yaml (e.g. in
+// /root/gfk) runs with no flags.
+func defaultConfigPath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Dir(exe)
+	for _, name := range []string{"server.yaml", "client.yaml", "gfk.yaml"} {
+		p := filepath.Join(dir, name)
+		if fi, statErr := os.Stat(p); statErr == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 func parseLevel(s string) slog.Level {
