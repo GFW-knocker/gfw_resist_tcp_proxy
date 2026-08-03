@@ -227,8 +227,13 @@ func (c *Config) Validate() error {
 	if c.Mode == ModeClient && c.Carrier.VPSIP == "" {
 		return fmt.Errorf("carrier.vps_ip is required for client mode")
 	}
-	if c.Carrier.ServerPort == 0 || c.Carrier.ClientPort == 0 {
-		return fmt.Errorf("carrier.server_port and carrier.client_port are required")
+	if c.Carrier.ServerPort == 0 {
+		return fmt.Errorf("carrier.server_port is required")
+	}
+	// client_port is the client's carrier source port; the server ignores it
+	// (it learns each client's real, NAT-translated port from sniffed packets).
+	if c.Mode == ModeClient && c.Carrier.ClientPort == 0 {
+		return fmt.Errorf("carrier.client_port is required for client mode")
 	}
 	if c.Carrier.ClientPortSpan < 0 || int(c.Carrier.ClientPort)+c.Carrier.ClientPortSpan-1 > 65535 {
 		return fmt.Errorf("carrier.client_port_span invalid: client_port + span - 1 exceeds 65535")

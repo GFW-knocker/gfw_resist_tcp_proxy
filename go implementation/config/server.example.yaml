@@ -9,7 +9,7 @@ carrier:
                           #   AWS/GCP). Set an IP only to force a specific source.
   server_port: 45000      # carrier TCP port base (must be closed to the OS; gfk handles RSTs)
   server_port_span: 8     # accept N ports from server_port; client rotates across them to escape a blocked port. MUST match client
-  client_port: 40000      # must match the client
+  # (no client_port here: the server learns each client's real source port from packets)
   interface: ""           # auto-detect; set e.g. "eth0" if detection is wrong
   mtu: 1400               # max carrier payload; IP packet = mtu + 40
 

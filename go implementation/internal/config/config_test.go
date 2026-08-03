@@ -34,6 +34,10 @@ func TestVPSIPRequirement(t *testing.T) {
 	if err := srv.Validate(); err != nil {
 		t.Errorf("server with empty vps_ip should validate, got: %v", err)
 	}
+	srv.Carrier.ClientPort = 0 // server ignores client_port; must not be required
+	if err := srv.Validate(); err != nil {
+		t.Errorf("server should not require client_port, got: %v", err)
+	}
 
 	cli := base
 	cli.Mode = ModeClient
