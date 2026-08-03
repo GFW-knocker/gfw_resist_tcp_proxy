@@ -1,0 +1,107 @@
+# Build gfk for Linux, macOS and Windows (many arches) + the Windows GUI, then
+# publish everything to a GitHub Release.
+#
+# Run it manually: Actions tab -> "Release" -> "Run workflow" -> enter the tag
+# and title. (workflow_dispatch prompts for them before it starts.)
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0) — created if it doesn't exist"
+        required: true
+        type: string
+      title:
+        description: "Release title"
+        required: true
+        type: string
+
+permissions:
+  contents: write # needed to create the release and its tag
+
+jobs:
+  # --- CLI: cgo-free, cross-compiled for many OS/arch from one Linux runner ---
+  build-cli:
+    name: CLI ${{ matrix.asset }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64,             asset: gfk-linux-amd64 }
+          - { goos: linux,   goarch: arm64,             asset: gfk-linux-arm64 }
+          - { goos: linux,   goarch: arm,   goarm: "7", asset: gfk-linux-armv7 }
+          - { goos: linux,   goarch: "386",             asset: gfk-linux-386 }
+          - { goos: windows, goarch: amd64,             asset: gfk-windows-amd64.exe }
+          - { goos: windows, goarch: arm64,             asset: gfk-windows-arm64.exe }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25" # keep in sync with "go implementation/go.mod"
+          cache-dependency-path: "go implementation/go.sum"
+      - name: Build
+        working-directory: "go implementation"
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+        run: go build -trimpath -ldflags "-s -w" -o "dist/${{ matrix.asset }}" ./cmd/gfk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: "go implementation/dist/${{ matrix.asset }}"
+          if-no-files-found: error
+
+  # --- Windows GUI: needs cgo + a C toolchain (Fyne). Built natively. ---
+  build-gui:
+    name: GUI gfk-gui.exe (windows/amd64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: "go implementation/go.sum"
+      - name: C toolchain (mingw is preinstalled on windows runners)
+        run: gcc --version
+      - name: Build GUI
+        working-directory: "go implementation"
+        env:
+          CGO_ENABLED: "1"
+        # -H windowsgui: no console window (the GUI has its own log pane).
+        run: go build -tags gui -trimpath -ldflags "-s -w -H windowsgui" -o dist/gfk-gui.exe ./cmd/gfk-gui
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gfk-gui.exe
+          path: "go implementation/dist/gfk-gui.exe"
+          if-no-files-found: error
+
+  # --- Collect all artifacts and publish the release ---
+  release:
+    name: Publish release
+    needs: [build-cli, build-gui]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4 # for the config templates
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true # flatten every artifact into dist/
+      - name: Add config templates to the release
+        run: |
+          cp "go implementation/config/server.example.yaml" dist/server.yaml
+          cp "go implementation/config/client.example.yaml" dist/client.yaml
+      - name: List
+        run: ls -lh dist
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.title }}
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

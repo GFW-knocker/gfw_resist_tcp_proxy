@@ -46,6 +46,23 @@ CGO_ENABLED=1 go build -tags gui -o gfk-gui.exe ./cmd/gfk-gui
 > (it's only imported under that tag). If that happens, `go get fyne.io/fyne/v2`
 > to restore it. The `gui` tag keeps Fyne entirely out of the cgo-free CLI build.
 
+## Releasing (CI)
+
+`.github/workflows/release.yml` builds everything and publishes a GitHub Release.
+Trigger it from the **Actions** tab → **Release** → **Run workflow**, entering the
+**tag** (e.g. `v0.1.0`, created if new) and **title**. It produces:
+
+- CLI (cgo-free, cross-compiled on one Linux runner): `gfk-linux-{amd64,arm64,armv7,386}`,
+  `gfk-windows-{amd64,arm64}.exe`.
+- Windows GUI (native cgo build on a Windows runner): `gfk-gui.exe`.
+- Config templates: `server.yaml`, `client.yaml` (copied from `config/*.example.yaml`).
+
+The `gfk.sh` installer pulls `gfk-linux-amd64` / `gfk-linux-arm64` from that release.
+
+> macOS is not built: the raw-packet carrier is linux/windows only. The code still
+> compiles on darwin (via `internal/carrier/packetio_other.go`, which fails cleanly
+> at startup) — a functional macOS client would need a BPF/libpcap backend.
+
 ## Run
 
 Edit `config/server.example.yaml` / `config/client.example.yaml` (set `vps_ip`,
