@@ -1,0 +1,45 @@
+# gfk server config (runs on the VPS, needs root).
+mode: server
+transport: kcp            # kcp (default) or quic
+
+carrier:
+  vps_ip: ""              # OPTIONAL on the server: leave empty to auto-derive the
+                          #   reply source IP per client from inbound packets
+                          #   (recommended; also correct on 1:1-NAT clouds like
+                          #   AWS/GCP). Set an IP only to force a specific source.
+  server_port: 45000      # carrier TCP port (must be closed to the OS; gfk handles RSTs)
+  client_port: 40000      # must match the client
+  interface: ""           # auto-detect; set e.g. "eth0" if detection is wrong
+  mtu: 1400               # max carrier payload; IP packet = mtu + 40
+
+firewall:
+  manage: ask             # ask | yes | no  (use "yes" under systemd)
+
+auth:
+  key: "CHANGE-ME-long-random-shared-secret"
+
+kcp:
+  nodelay: 1              # 1 = low-latency mode (fast flush + ACK); 0 = normal (lower CPU, more delay)
+  interval: 10            # internal update/flush period, ms (10 = responsive, 20-40 = lower CPU)
+  resend: 2               # fast-retransmit after this many duplicate ACKs; 0 = disabled
+  nc: 1                   # 1 = no congestion control (KCP's normal mode); 0 = CC on (usually WORSE here)
+  sndwnd: 128             # send window, packets — the MAIN speed/latency knob
+  rcvwnd: 128             # receive window, packets. Set near BDP: pkts ≈ bandwidth_bps × RTT_s / 8 / mtu.
+                          # too small = caps speed; too large = bufferbloat (high jitter). See profiles.
+  fec_data: 0             # Reed-Solomon FEC data shards; 0 = FEC off (saves bandwidth)
+  fec_parity: 0           # parity shards (losses recovered per group); MUST match on both ends
+  stream_buffer: 0        # smux per-connection buffer, bytes. 0 = auto (from window); override only if needed
+  session_buffer: 0       # smux whole-tunnel buffer, bytes. 0 = auto
+  # ── profiles: set the SAME nc + window on client AND server ──
+  # dial-up ≤256 kbps    : sndwnd/rcvwnd:16
+  # slow 1-6 Mbps        : sndwnd/rcvwnd:128   (default)
+  # broadband 10-50 Mbps : sndwnd/rcvwnd:512
+  # fast 100-500 Mbps    : sndwnd/rcvwnd:8192
+  # lossy / adversarial  : add fec_data:10  fec_parity:3 (both ends)
+
+server:
+  backend_ip: "127.0.0.1" # where forwarded connections are dialed (e.g. local xray)
+  allow_socks5: false     # true = let clients dial arbitrary targets (SOCKS mode)
+  allowed_ports: []       # restrict destination ports, e.g. [443, 2096, 2052]. Empty = any port.
+
+log_level: info

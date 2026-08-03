@@ -1,0 +1,124 @@
+# gfk — Go implementation
+
+A Go rewrite of the original Python variant (in `../python implementation/`).
+Same core idea (send data over
+handshake-less TCP ACK+PSH packets so the GFW's SYN-only IP blocklist never sees
+it), but with a proper reliability layer, multiplexing, keepalive/auto-reconnect,
+multi-client support, and no Python/scapy in the hot path.
+
+## Architecture
+
+```
+tunnel/      port-forward + SOCKS5 listeners (client) · dial backend/target (server)
+   │           each stream starts with an HMAC-authenticated connect header
+transport/   pluggable reliability + mux:  KCP+smux(+FEC)  |  QUIC
+   │           both run over a net.PacketConn
+carrier/     fake-TCP net.PacketConn: craft/sniff TCP ACK+PSH, NO SYN
+   │           Linux: AF_INET raw send + AF_PACKET capture (cgo-free)
+   │           Windows: Npcap via wpcap.dll syscall bindings (cgo-free)
+firewall/    RST suppression (iptables on Linux, Windows Firewall on Windows)
+```
+
+The carrier is **connectionless**: it never "disconnects", so reconnection only
+re-establishes the KCP/QUIC session on top (handled by `supervisor/`). Because the
+carrier's `ReadFrom` reports each packet's real source address, one server
+demultiplexes many client PCs automatically.
+
+## Build
+
+The **CLI** (`cmd/gfk`, client + server) is cgo-free:
+
+```sh
+# Linux server / Linux client:
+CGO_ENABLED=0 GOOS=linux  go build -o gfk      ./cmd/gfk
+# Windows client (needs Npcap runtime installed on the target machine):
+CGO_ENABLED=0 GOOS=windows go build -o gfk.exe ./cmd/gfk
+```
+
+The **Windows GUI** (`cmd/gfk-gui`, Fyne) is built separately behind the `gui`
+build tag and needs cgo + a C compiler (mingw-w64):
+
+```sh
+CGO_ENABLED=1 go build -tags gui -o gfk-gui.exe ./cmd/gfk-gui
+```
+
+> Caveat: `go mod tidy` run *without* `-tags gui` will prune Fyne from `go.mod`
+> (it's only imported under that tag). If that happens, `go get fyne.io/fyne/v2`
+> to restore it. The `gui` tag keeps Fyne entirely out of the cgo-free CLI build.
+
+## Run
+
+Edit `config/server.example.yaml` / `config/client.example.yaml` (set `vps_ip`,
+a shared `auth.key`, ports, forwards). Then:
+
+> `vps_ip` is required on the **client** (where to send / whose replies to accept)
+> but **optional on the server** — leave it empty and the server derives each
+> client's reply source IP from inbound packets. That's the recommended default
+> and is also what makes it work behind 1:1-NAT clouds (AWS/GCP/Oracle), where a
+> forced public source IP gets dropped by egress anti-spoofing.
+
+```sh
+# server (VPS, root):
+sudo ./gfk -config server.yaml            # or use scripts/install-server.sh for systemd
+
+# client (PC, admin + Npcap on Windows / root on Linux):
+./gfk -config client.yaml
+```
+
+Both sides need to suppress kernel RSTs on the carrier port. gfk does this itself
+(prompts once, unless `firewall.manage: yes` or `-dropRST`).
+
+### Restricting destination ports (server)
+
+Set `server.allowed_ports` to limit which ports clients may reach (applies to
+both port-forwards and SOCKS targets). Empty = any port.
+
+```yaml
+server:
+  allowed_ports: [443, 2096, 2052]   # clients can only reach these ports
+```
+
+### Throughput / latency tuning (`kcp:`)
+
+Run with `nc: 1` (KCP's normal, no-congestion-control mode) and size the **window**
+(`sndwnd`/`rcvwnd`, packets) to the link's bandwidth-delay product — this is the one
+knob that matters:
+
+    window_pkts ≈ bandwidth_bps × RTT_seconds / 8 / mtu
+
+Too small caps throughput; too large causes bufferbloat (high jitter under load).
+The smux buffers auto-size from the window (`stream_buffer`/`session_buffer: 0`), so
+you normally tune only the window. Starting points:
+
+| line speed | sndwnd / rcvwnd |
+|---|---|
+| dial-up ≤256 kbps | 16 |
+| slow 1–6 Mbps (default) | 128 |
+| broadband 10–50 Mbps | 512 |
+| fast 100–500 Mbps | 8192 |
+
+Set the same `nc` + window on **both** ends. For a lossy/adversarial link add
+`fec_data: 10` / `fec_parity: 3` (must match on both ends; ~30% bandwidth cost).
+Avoid `nc: 0` — kcp-go's congestion control underperforms badly over this carrier
+(collapses throughput). Bound bufferbloat with the window instead.
+
+## Requirements
+
+- **Linux**: root (raw sockets + iptables). No libpcap needed.
+- **Windows**: Administrator + [Npcap](https://npcap.com) installed (runtime only,
+  no SDK).
+
+## Windows GUI
+
+`gfk-gui.exe` is a single self-contained window (no runtime deps beyond Npcap):
+enter VPS IP / shared key / transport / SOCKS5 / forwards (or Load a client.yaml),
+tick "Manage firewall", and Connect. It shows live connection status, ↑↓
+throughput, and a log pane. Run as Administrator.
+
+## Status
+
+- Core engine: complete; end-to-end tested over loopback (KCP, QUIC, SOCKS5).
+- Windows GUI: complete; builds and launches.
+- **Not yet validated:** the raw carrier path on a real client+VPS (needs
+  root/admin + real network). Perf/stability hardening (reconnect port-rotation,
+  kernel BPF on Linux, KCP-vs-QUIC benchmarks, FEC/MTU tuning) is the next step.
