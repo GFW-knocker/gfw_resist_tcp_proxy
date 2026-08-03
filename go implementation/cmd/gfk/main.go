@@ -116,6 +116,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer car.Close()
+	logger.Info("carrier bound", "local_ip", car.LocalIP(), "interface", cfg.Carrier.Interface)
 
 	params := transport.Params{
 		Transport:        cfg.Transport,

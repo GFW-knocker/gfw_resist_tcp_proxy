@@ -130,10 +130,12 @@ func parseIPv4(data []byte) (segment, bool) {
 	return seg, true
 }
 
-// localIPToward returns the source IP the OS would use to reach dst. It opens a
-// UDP socket but sends nothing, so it is cheap and side-effect-free.
+// localIPToward returns the source IP the OS would use to reach dst. The UDP
+// "dial" only connect()s (a route lookup) and sends nothing, so it is cheap and
+// side-effect-free. The destination port is arbitrary — 53 by convention, since
+// no packet is ever emitted to it; the kernel picks the local source port.
 func localIPToward(dst net.IP) (net.IP, error) {
-	c, err := net.Dial("udp", net.JoinHostPort(dst.String(), "9"))
+	c, err := net.Dial("udp", net.JoinHostPort(dst.String(), "53"))
 	if err != nil {
 		return nil, err
 	}

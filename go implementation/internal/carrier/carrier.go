@@ -98,8 +98,16 @@ func Open(opts Options) (*Carrier, error) {
 	case opts.Interface != "":
 		localIP = nil // server: NIC chosen by name; source IP derived per client
 	default:
-		// server, no VPSIP and no interface: bind the default-route NIC.
-		localIP, err = localIPToward(net.IPv4(192, 0, 2, 1)) // TEST-NET-1: route lookup only, no packet sent
+		// server, no VPSIP and no interface: find the primary egress NIC. Try the
+		// default-route source first — connect() to a globally-routable address
+		// resolves via the default gateway and sends NO packet, so we just read
+		// back the source IP the kernel would use. (A bogon/reserved probe like
+		// TEST-NET can fail next-hop resolution on some hosts, e.g. OVH.) If even
+		// that fails, fall back to the first up, non-loopback IPv4 interface.
+		localIP, err = localIPToward(net.IPv4(8, 8, 8, 8))
+		if err != nil || localIP == nil {
+			localIP, err = firstGlobalUnicastIPv4()
+		}
 		if err != nil {
 			return nil, fmt.Errorf("carrier: auto-detect default interface (set carrier.interface): %w", err)
 		}
@@ -154,6 +162,38 @@ func (c *Carrier) RotateClientPort() uint16 {
 // usableSrcIP reports whether ip is a sane reply source address.
 func usableSrcIP(ip net.IP) bool {
 	return ip != nil && !ip.IsUnspecified() && !ip.IsLoopback() && !ip.IsMulticast()
+}
+
+// firstGlobalUnicastIPv4 returns the IPv4 of the first up, non-loopback
+// interface — a dial-free fallback for egress-NIC detection when a route lookup
+// is unavailable (e.g. no route to the probe address on the VPS).
+func firstGlobalUnicastIPv4() (net.IP, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	for _, ifi := range ifaces {
+		if ifi.Flags&net.FlagUp == 0 || ifi.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifi.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			var ip net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip4 := ip.To4(); ip4 != nil && ip.IsGlobalUnicast() {
+				return ip4, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no up, non-loopback IPv4 interface found")
 }
 
 func (c *Carrier) recvLoop() {
