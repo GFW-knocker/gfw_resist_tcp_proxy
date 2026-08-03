@@ -39,10 +39,14 @@ kcp:
 client:
   # SOCKS5 proxy for any app (requires server allow_socks5: true). Empty disables.
   socks5_listen: "127.0.0.1:1080"
-  # Fixed port-forwards: local listener -> server backend_ip:target_port.
+  # Port-forwards: each entry is an INDEPENDENT local listener -> server backend_ip:target_port.
+  # Add as many as you want — they ALL run at the same time over the single tunnel (one
+  # multiplexed session). Each `listen` port must be unique; each entry may target a different
+  # port. Example below: three local ports, each mapped to a different server-side service.
   forwards:
-    - {proto: tcp, listen: "127.0.0.1:14000", target_port: 443}
-    - {proto: tcp, listen: "127.0.0.1:15000", target_port: 2096}
+    - {proto: tcp, listen: "127.0.0.1:14000", target_port: 2096}
+    - {proto: tcp, listen: "127.0.0.1:15000", target_port: 443}
+    - {proto: tcp, listen: "127.0.0.1:16000", target_port: 2083}
     - {proto: udp, listen: "127.0.0.1:17000", target_port: 945}
   keepalive_seconds: 4    # heartbeat; keeps the NAT pinhole open. Dead-peer detect ~= 2x this
   reconnect_seconds: 2    # delay between reconnect attempts

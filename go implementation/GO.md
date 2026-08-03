@@ -85,6 +85,26 @@ not the release.
 Both sides need to suppress kernel RSTs on the carrier port. gfk does this itself
 (prompts once, unless `firewall.manage: yes` or `-dropRST`).
 
+### Forwarding several ports at once (client)
+
+`client.forwards` is a list — each entry is an independent local listener mapped
+to a server-side `target_port`, and they **all run simultaneously over the single
+tunnel** (one KCP session, smux-multiplexed; not one tunnel per port). Each
+`listen` must be unique; targets may differ:
+
+```yaml
+client:
+  forwards:
+    - {proto: tcp, listen: "127.0.0.1:14000", target_port: 2096}
+    - {proto: tcp, listen: "127.0.0.1:15000", target_port: 443}
+    - {proto: tcp, listen: "127.0.0.1:16000", target_port: 2083}
+    - {proto: udp, listen: "127.0.0.1:17000", target_port: 945}
+```
+
+A connection to `127.0.0.1:15000` reaches `backend_ip:443` on the server, one to
+`:16000` reaches `:2083`, and so on. This works alongside `socks5_listen` (a
+SOCKS5 proxy over the same tunnel).
+
 ### Surviving a blocked carrier port (port spans)
 
 If a middlebox starts dropping a specific carrier port, gfk recovers on reconnect
