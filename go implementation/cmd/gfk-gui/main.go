@@ -364,6 +364,7 @@ func startEngine(cfg config.Config, applyFW bool, onState func(supervisor.State)
 		ServerPort:     cfg.Carrier.ServerPort,
 		ClientPort:     cfg.Carrier.ClientPort,
 		ClientPortSpan: cfg.Carrier.ClientPortSpan,
+		ServerPortSpan: cfg.Carrier.ServerPortSpan,
 		Interface:      cfg.Carrier.Interface,
 	})
 	if err != nil {
@@ -391,6 +392,7 @@ func startEngine(cfg config.Config, applyFW bool, onState func(supervisor.State)
 	sup := supervisor.New(func(dctx context.Context) (transport.Session, error) {
 		if dialCount > 0 {
 			car.RotateClientPort() // fresh source port on reconnect
+			car.RotateServerPort() // rotate server port to escape a blocked one
 		}
 		dialCount++
 		sess, err := transport.Dial(dctx, car, remote, params)

@@ -4,7 +4,8 @@ transport: kcp            # must match the server
 
 carrier:
   vps_ip: "203.0.113.10"  # the SERVER's public (filtered) IP
-  server_port: 45000      # must match the server
+  server_port: 45000      # must match the server (base of the server-port span)
+  server_port_span: 8     # server accepts N ports; client rotates dest across them on reconnect to escape a blocked port. MUST match server
   client_port: 40000      # carrier TCP source port on this machine (base of the rotation range)
   client_port_span: 8     # rotate source port across N ports on reconnect (avoids session collision); 1 = off
   interface: ""           # auto-detect; set the NIC name if detection is wrong

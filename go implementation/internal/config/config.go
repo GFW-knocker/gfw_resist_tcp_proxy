@@ -74,6 +74,10 @@ type CarrierConfig struct {
 	// ClientPort) on each reconnect, so a new session doesn't collide with the
 	// server's not-yet-expired old one. 1 = disable. The firewall covers the range.
 	ClientPortSpan int `yaml:"client_port_span"`
+	// ServerPortSpan makes the server accept this many carrier ports (starting at
+	// ServerPort) and the client rotate the destination across them on reconnect,
+	// to escape a middlebox that blocks one port. MUST match on both ends. 1 = off.
+	ServerPortSpan int `yaml:"server_port_span"`
 	// Interface is the NIC to capture/inject on. Empty = auto-detect the
 	// interface used to reach VPSIP.
 	Interface string `yaml:"interface"`
@@ -160,6 +164,7 @@ func Default() Config {
 			ServerPort:     45000,
 			ClientPort:     40000,
 			ClientPortSpan: 8,
+			ServerPortSpan: 8,
 			MTU:            1400,
 		},
 		Firewall: FirewallConfig{Manage: FirewallAsk},
@@ -227,6 +232,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Carrier.ClientPortSpan < 0 || int(c.Carrier.ClientPort)+c.Carrier.ClientPortSpan-1 > 65535 {
 		return fmt.Errorf("carrier.client_port_span invalid: client_port + span - 1 exceeds 65535")
+	}
+	if c.Carrier.ServerPortSpan < 0 || int(c.Carrier.ServerPort)+c.Carrier.ServerPortSpan-1 > 65535 {
+		return fmt.Errorf("carrier.server_port_span invalid: server_port + span - 1 exceeds 65535")
 	}
 	if c.Carrier.MTU < 576 || c.Carrier.MTU > 1500 {
 		return fmt.Errorf("carrier.mtu must be between 576 and 1500, got %d", c.Carrier.MTU)

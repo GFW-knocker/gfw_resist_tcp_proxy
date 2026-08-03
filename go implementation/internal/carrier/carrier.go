@@ -25,6 +25,10 @@ type Options struct {
 	// ClientPortSpan is how many source ports the client rotates through on
 	// reconnect, starting at ClientPort. 1 (or 0) disables rotation.
 	ClientPortSpan int
+	// ServerPortSpan is how many carrier ports the server accepts (starting at
+	// ServerPort) and the client rotates the destination across on reconnect, to
+	// escape a middlebox blocking one port. Must match on both ends. 1 disables.
+	ServerPortSpan int
 	Interface      string // NIC name; empty = auto-detect toward VPSIP
 	SnapLen        int    // capture length; defaults applied if 0
 }
@@ -33,6 +37,14 @@ type Options struct {
 type rxPacket struct {
 	data []byte
 	addr *Addr
+}
+
+// replySrc is the (IP, port) the server crafts replies from for a given client:
+// the exact destination that client addressed it at. Learned per client so the
+// client's ingress filter matches and a server port span works.
+type replySrc struct {
+	ip   net.IP
+	port uint16
 }
 
 // Carrier is a net.PacketConn over the fake-TCP link.
@@ -46,9 +58,13 @@ type Carrier struct {
 	// [ClientPort, ClientPort+ClientPortSpan) on reconnect to dodge a KCP session
 	// collision with the server's not-yet-expired old session.
 	curClientPort atomic.Uint32
+	// curServerPort is the server port the client currently targets, rotated
+	// across [ServerPort, ServerPort+ServerPortSpan) on reconnect to escape a
+	// middlebox that has started dropping a specific port.
+	curServerPort atomic.Uint32
 
-	// learnedSrc maps a client addr string -> the reply source IP (the dst IP the
-	// client addressed us at). Server auto-derive mode only (VPSIP nil).
+	// learnedSrc maps a client addr string -> replySrc (the exact IP+port the
+	// client addressed us at), so the server replies from that address.
 	learnedSrc sync.Map
 
 	bytesIn  atomic.Uint64
@@ -134,6 +150,7 @@ func Open(opts Options) (*Carrier, error) {
 		closed:  make(chan struct{}),
 	}
 	c.curClientPort.Store(uint32(opts.ClientPort))
+	c.curServerPort.Store(uint32(opts.ServerPort))
 	if opts.Role == RoleClient {
 		c.peer = &Addr{IP: opts.VPSIP, Port: opts.ServerPort}
 	}
@@ -156,6 +173,20 @@ func (c *Carrier) RotateClientPort() uint16 {
 	base := uint32(c.opts.ClientPort)
 	next := base + (c.curClientPort.Load()-base+1)%uint32(c.opts.ClientPortSpan)
 	c.curClientPort.Store(next)
+	return uint16(next)
+}
+
+// RotateServerPort advances the server port the client targets within its span,
+// so a reconnect tries a different carrier port — escaping a middlebox that has
+// started dropping the current one. The server accepts the whole span, so no
+// coordination is needed. No-op on the server or when span<=1.
+func (c *Carrier) RotateServerPort() uint16 {
+	if c.opts.Role != RoleClient || c.opts.ServerPortSpan <= 1 {
+		return uint16(c.curServerPort.Load())
+	}
+	base := uint32(c.opts.ServerPort)
+	next := base + (c.curServerPort.Load()-base+1)%uint32(c.opts.ServerPortSpan)
+	c.curServerPort.Store(next)
 	return uint16(next)
 }
 
@@ -215,24 +246,30 @@ func (c *Carrier) recvLoop() {
 
 		var addr *Addr
 		if c.opts.Role == RoleClient {
-			if !seg.srcIP.Equal(c.opts.VPSIP) || seg.srcPort != c.opts.ServerPort || seg.dstPort != uint16(c.curClientPort.Load()) {
+			if !seg.srcIP.Equal(c.opts.VPSIP) || seg.srcPort != uint16(c.curServerPort.Load()) || seg.dstPort != uint16(c.curClientPort.Load()) {
 				continue
 			}
 			addr = c.peer
 		} else {
-			if seg.dstPort != c.opts.ServerPort {
+			// Accept any dst port in the server span; the client rotates within it.
+			span := c.opts.ServerPortSpan
+			if span < 1 {
+				span = 1
+			}
+			if int(seg.dstPort) < int(c.opts.ServerPort) || int(seg.dstPort) >= int(c.opts.ServerPort)+span {
 				continue
 			}
 			ipCopy := make(net.IP, len(seg.srcIP))
 			copy(ipCopy, seg.srcIP)
 			addr = &Addr{IP: ipCopy, Port: seg.srcPort}
-			// Auto-derive: remember the IP the client addressed us at, to use as the
-			// reply source. Stored before the packet reaches the transport, so a
-			// later WriteTo always finds it. Skipped when VPSIP overrides.
-			if c.opts.VPSIP == nil && usableSrcIP(seg.dstIP) {
+			// Remember the exact address the client reached us at (IP + port) so we
+			// reply from it. Stored before the packet reaches the transport, so a
+			// later WriteTo always finds it. The port makes the server span work;
+			// the IP is used as the reply source unless VPSIP overrides it.
+			if usableSrcIP(seg.dstIP) {
 				dstCopy := make(net.IP, len(seg.dstIP))
 				copy(dstCopy, seg.dstIP)
-				c.learnedSrc.Store(addr.String(), dstCopy)
+				c.learnedSrc.Store(addr.String(), replySrc{ip: dstCopy, port: seg.dstPort})
 			}
 		}
 
@@ -288,22 +325,26 @@ func (c *Carrier) WriteTo(p []byte, addr net.Addr) (int, error) {
 	var srcPort, dstPort uint16
 	if c.opts.Role == RoleClient {
 		srcIP, srcPort = c.localIP, uint16(c.curClientPort.Load())
-		dstIP, dstPort = c.opts.VPSIP, c.opts.ServerPort
+		dstIP, dstPort = c.opts.VPSIP, uint16(c.curServerPort.Load())
 	} else {
 		ip, port, ok := addrFromNet(addr)
 		if !ok {
 			return 0, fmt.Errorf("carrier: bad destination addr %v", addr)
 		}
-		src := c.opts.VPSIP // configured override, if any
-		if src == nil {
-			if v, found := c.learnedSrc.Load((&Addr{IP: ip, Port: port}).String()); found {
-				src = v.(net.IP)
+		key := (&Addr{IP: ip, Port: port}).String()
+		replyIP := c.opts.VPSIP        // IP override, if configured
+		replyPort := c.opts.ServerPort // fallback until we've learned the client's port
+		if v, found := c.learnedSrc.Load(key); found {
+			ls := v.(replySrc)
+			if replyIP == nil {
+				replyIP = ls.ip
 			}
+			replyPort = ls.port // reply from the exact port the client used (server span)
 		}
-		if src == nil {
-			return 0, fmt.Errorf("carrier: no reply source IP for %s yet (no inbound packet seen)", (&Addr{IP: ip, Port: port}).String())
+		if replyIP == nil {
+			return 0, fmt.Errorf("carrier: no reply source for %s yet (no inbound packet seen)", key)
 		}
-		srcIP, srcPort = src, c.opts.ServerPort
+		srcIP, srcPort = replyIP, replyPort
 		dstIP, dstPort = ip, port
 	}
 

@@ -159,6 +159,81 @@ func TestRotateClientPort(t *testing.T) {
 	}
 }
 
+// TestServerPortSpan: the server accepts any dst port within its span and
+// replies from the exact port the client used; ports outside the span are
+// ignored.
+func TestServerPortSpan(t *testing.T) {
+	f := newFakeIO()
+	c := &Carrier{
+		opts:   Options{Role: RoleServer, ServerPort: 45000, ServerPortSpan: 8},
+		pio:    f,
+		rx:     make(chan rxPacket, 16),
+		closed: make(chan struct{}),
+	}
+	c.curServerPort.Store(uint32(c.opts.ServerPort))
+	go c.recvLoop()
+	defer c.Close()
+
+	client := net.IPv4(198, 51, 100, 7)
+	addressed := net.IPv4(203, 0, 113, 9)
+
+	// client targets server port 45003 (inside the span) — must be accepted.
+	pkt, err := craftSegment(client, addressed, 40000, 45003, 1, 1, []byte("hi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.inbound <- pkt
+	buf := make([]byte, 2048)
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, addr, err := c.ReadFrom(buf)
+	if err != nil {
+		t.Fatalf("server should accept port 45003 within span: %v", err)
+	}
+	if string(buf[:n]) != "hi" {
+		t.Fatalf("payload = %q", buf[:n])
+	}
+
+	// reply must leave from 45003 (the port the client used), not the base.
+	if _, err := c.WriteTo([]byte("yo"), addr); err != nil {
+		t.Fatal(err)
+	}
+	seg, ok := parseIPv4(<-f.sent)
+	if !ok {
+		t.Fatal("could not parse reply")
+	}
+	if seg.srcPort != 45003 {
+		t.Errorf("reply srcPort = %d, want 45003 (the port the client used)", seg.srcPort)
+	}
+	if !seg.srcIP.Equal(addressed) {
+		t.Errorf("reply srcIP = %v, want %v", seg.srcIP, addressed)
+	}
+
+	// a port outside the span must be ignored.
+	pkt2, _ := craftSegment(client, addressed, 40000, 45100, 1, 1, []byte("nope"))
+	f.inbound <- pkt2
+	_ = c.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	if _, _, err := c.ReadFrom(buf); err == nil {
+		t.Error("server must ignore port 45100 (outside span)")
+	}
+}
+
+// TestRotateServerPort: the client cycles the targeted server port within span.
+func TestRotateServerPort(t *testing.T) {
+	c := &Carrier{opts: Options{Role: RoleClient, ServerPort: 45000, ServerPortSpan: 4}}
+	c.curServerPort.Store(uint32(c.opts.ServerPort))
+	want := []uint16{45001, 45002, 45003, 45000, 45001}
+	for i, w := range want {
+		if got := c.RotateServerPort(); got != w {
+			t.Fatalf("rotate #%d = %d, want %d", i, got, w)
+		}
+	}
+	srv := &Carrier{opts: Options{Role: RoleServer, ServerPort: 45000, ServerPortSpan: 8}}
+	srv.curServerPort.Store(45000)
+	if got := srv.RotateServerPort(); got != 45000 {
+		t.Errorf("server must not rotate, got %d", got)
+	}
+}
+
 // TestServerExplicitVPSIPOverrides: when VPSIP is set, replies use it regardless
 // of what the client addressed.
 func TestServerExplicitVPSIPOverrides(t *testing.T) {

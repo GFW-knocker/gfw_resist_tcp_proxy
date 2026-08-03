@@ -70,7 +70,11 @@ func main() {
 	defer stop()
 
 	// --- Firewall (RST suppression) --- covers the client's port-rotation range.
-	fwRules := firewall.Rules{PortStart: cfg.Carrier.ServerPort, PortEnd: cfg.Carrier.ServerPort}
+	sspan := cfg.Carrier.ServerPortSpan
+	if sspan < 1 {
+		sspan = 1
+	}
+	fwRules := firewall.Rules{PortStart: cfg.Carrier.ServerPort, PortEnd: cfg.Carrier.ServerPort + uint16(sspan) - 1}
 	if cfg.Mode == config.ModeClient {
 		span := cfg.Carrier.ClientPortSpan
 		if span < 1 {
@@ -109,6 +113,7 @@ func main() {
 		ServerPort:     cfg.Carrier.ServerPort,
 		ClientPort:     cfg.Carrier.ClientPort,
 		ClientPortSpan: cfg.Carrier.ClientPortSpan,
+		ServerPortSpan: cfg.Carrier.ServerPortSpan,
 		Interface:      cfg.Carrier.Interface,
 	})
 	if err != nil {
@@ -146,11 +151,12 @@ func runClient(ctx context.Context, cfg config.Config, car *carrier.Carrier, par
 	dialCount := 0
 	sup := supervisor.New(func(dctx context.Context) (transport.Session, error) {
 		if dialCount > 0 {
-			// Reconnect: use a fresh source port so the server sees a new flow
-			// instead of colliding with its previous (still-expiring) session.
-			if p := car.RotateClientPort(); p != 0 {
-				logger.Debug("rotated carrier source port for reconnect", "port", p)
-			}
+			// Reconnect: rotate the client source port (fresh flow, avoids
+			// colliding with the server's still-expiring session) AND the server
+			// destination port (escapes a middlebox blocking the current one).
+			cp := car.RotateClientPort()
+			sp := car.RotateServerPort()
+			logger.Debug("rotated carrier ports for reconnect", "client_port", cp, "server_port", sp)
 		}
 		dialCount++
 		sess, err := transport.Dial(dctx, car, remote, params)

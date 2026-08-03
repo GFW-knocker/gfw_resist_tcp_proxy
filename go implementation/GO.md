@@ -85,6 +85,22 @@ not the release.
 Both sides need to suppress kernel RSTs on the carrier port. gfk does this itself
 (prompts once, unless `firewall.manage: yes` or `-dropRST`).
 
+### Surviving a blocked carrier port (port spans)
+
+If a middlebox starts dropping a specific carrier port, gfk recovers on reconnect
+without any manual change:
+
+- `carrier.client_port_span` — the client rotates its **source** port each
+  reconnect (avoids colliding with the server's still-expiring old session).
+- `carrier.server_port_span` — the **server accepts a whole range** of ports, and
+  the client rotates the **destination** port it targets each reconnect, stepping
+  past a blocked one (a blocked port just costs one ~8 s hello-verify timeout).
+  **Must match on both ends** (like the PSK). Default 8.
+
+Rotation (server can't signal a new port over a dead tunnel) is avoided in favour
+of a span: the server passively listens on the whole range, so no coordination is
+needed. The RST-suppression firewall auto-covers each side's full range.
+
 ### Restricting destination ports (server)
 
 Set `server.allowed_ports` to limit which ports clients may reach (applies to
