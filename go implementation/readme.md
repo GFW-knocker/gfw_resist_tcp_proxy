@@ -208,11 +208,3 @@ Avoid `nc: 0` — kcp-go's congestion control underperforms badly over this carr
 enter VPS IP / shared key / transport / SOCKS5 / forwards (or Load a client.yaml),
 tick "Manage firewall", and Connect. It shows live connection status, ↑↓
 throughput, and a log pane. Run as Administrator.
-
-## Status
-
-- Core engine: complete; end-to-end tested over loopback (KCP, QUIC, SOCKS5).
-- Windows GUI: complete; builds and launches.
-- **Not yet validated:** the raw carrier path on a real client+VPS (needs
-  root/admin + real network). Perf/stability hardening (reconnect port-rotation,
-  kernel BPF on Linux, KCP-vs-QUIC benchmarks, FEC/MTU tuning) is the next step.
