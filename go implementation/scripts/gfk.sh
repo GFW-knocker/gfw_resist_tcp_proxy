@@ -23,8 +23,9 @@ SERVICE_NAME="gfk"
 SERVICE="/etc/systemd/system/${SERVICE_NAME}.service"
 # The script comes from the repo; %20 is the space in the "go implementation" dir.
 SELF_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/go%20implementation/scripts/gfk.sh"
-# Only the binaries are release assets.
+# Release assets: the binaries plus the server.yaml / client.yaml templates.
 bin_url() { echo "https://github.com/${REPO}/releases/latest/download/gfk-linux-$1"; }
+CONFIG_URL="https://github.com/${REPO}/releases/latest/download/server.yaml"
 
 grn=$'\e[32m'; yel=$'\e[33m'; red=$'\e[31m'; rst=$'\e[0m'
 info() { echo "${grn}[gfk]${rst} $*"; }
@@ -69,40 +70,23 @@ install_self() {
   chmod +x "$SELF"
 }
 
-write_default_config() {
-  if [ -f "$CONFIG" ]; then info "keeping existing $CONFIG"; return 0; fi
-  info "writing default $CONFIG"
-  cat > "$CONFIG" <<'YAML'
-# gfk SERVER config (VPS). EDIT auth.key so it matches the client.
-mode: server
-transport: kcp
-carrier:
-  vps_ip: ""              # empty = auto-derive reply source IP (recommended)
-  server_port: 45000      # must match client
-  client_port: 40000      # must match client
-  interface: ""           # auto-detect default NIC; set e.g. "eth0" if wrong
-  mtu: 1400               # must match client
-firewall:
-  manage: ask             # the service passes -dropRST, so RST rules are applied automatically
-auth:
-  key: "CHANGE-ME-to-a-long-random-shared-secret"   # <-- EDIT (must match client)
-kcp:
-  nodelay: 1
-  interval: 10
-  resend: 2
-  nc: 1
-  sndwnd: 128             # size to your link speed (see client config profiles)
-  rcvwnd: 128
-  fec_data: 0
-  fec_parity: 0
-  stream_buffer: 0        # 0 = auto
-  session_buffer: 0
-server:
-  backend_ip: "127.0.0.1" # where forwarded connections are dialed (your local xray)
-  allow_socks5: false
-  allowed_ports: []       # restrict destination ports, e.g. [443, 2096, 2052]. Empty = any.
-log_level: info
-YAML
+# ensure_config downloads the default server.yaml from the release the FIRST time.
+# If a config is already present it is left completely untouched, so re-running
+# 'install' (and 'update') only refresh the binary and never overwrite your edits.
+ensure_config() {
+  if [ -f "$CONFIG" ]; then
+    info "keeping existing $CONFIG (left intact; only the binary is updated)"
+    return 0
+  fi
+  info "downloading default server.yaml from the latest release…"
+  if ! fetch "$CONFIG_URL" "$CONFIG.tmp"; then
+    err "could not download server.yaml from $CONFIG_URL"
+    err "create $CONFIG yourself (template: config/server.example.yaml in the repo), then re-run."
+    rm -f "$CONFIG.tmp"
+    exit 1
+  fi
+  mv -f "$CONFIG.tmp" "$CONFIG"
+  info "wrote $CONFIG — EDIT auth.key (and ports if needed) before starting"
 }
 
 write_service() {
@@ -131,7 +115,7 @@ cmd_install() {
   need_root install
   command -v systemctl >/dev/null 2>&1 || { err "systemd not found; this installer targets systemd"; exit 1; }
   download_binary
-  write_default_config
+  ensure_config
   write_service
   install_self
   systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true   # start at boot
