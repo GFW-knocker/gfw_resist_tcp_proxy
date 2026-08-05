@@ -1,14 +1,18 @@
 # NEW: Go binary released
-see this : 
+I recommend to use Go version :
+- https://github.com/GFW-knocker/gfw_resist_tcp_proxy/tree/main/go%20implementation
 
-https://github.com/GFW-knocker/gfw_resist_tcp_proxy/tree/main/go%20implementation
+Download stable binary (GO version) from here :
+- https://github.com/GFW-knocker/gfw_resist_tcp_proxy/releases/latest/
 
+one-line install on vps:
+```sh
+bash <(curl -fsSL 'https://raw.githubusercontent.com/GFW-knocker/gfw_resist_tcp_proxy/main/go%20implementation/scripts/gfk.sh') install
+```
 # توجه
 توجه: این متد اتصال، در قطعی اینترنت ناشی از سرکوب خونین مردم در دیماه 1404 کاملا جواب میداد. اما نیاز به خط اینترنت ثابت و دسترسی روت هم در vps و هم در pc دارد. ( در نت موبایل ، 4g ، td-lte و دانگل و هات اسپات و امثالهم جواب نمیدهد چون نیازمند ارسال پکت نامتعارف به شبکه است اما در خطوط ثابت و مودم های adsl استاندارد و همچنین سرور ایران که نت پهن باند دارند قابل استفاده است )
 
 پیاده سازی این پروژه با گو : (https://github.com/GFW-knocker/gfw_resist_tcp_proxy/tree/main/go%20implementation)
-
-دانلود نسخه باینری استیبل و پایدار : (https://github.com/GFW-knocker/gfw_resist_tcp_proxy/releases/latest)
 
 نمونه دیگری پیاده شده با زبان گو :  (https://github.com/hanselime/paqet)
 
